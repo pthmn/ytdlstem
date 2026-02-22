@@ -1,0 +1,30 @@
+# render.yaml — Render Blueprint for free-tier deployment
+# Deploy both frontend and backend as separate web services
+
+services:
+  # === Backend: FastAPI + Python ===
+  - type: web
+    name: ytdlstem-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: FRONTEND_URL
+        value: https://ytdlstem-frontend.onrender.com
+      - key: MAX_WORKERS
+        value: "2"
+      - key: CLEANUP_AFTER
+        value: "1800"
+    healthCheckPath: /api/health
+
+  # === Frontend: Next.js ===
+  - type: web
+    name: ytdlstem-frontend
+    runtime: node
+    plan: free
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: https://ytdlstem-backend.onrender.com
