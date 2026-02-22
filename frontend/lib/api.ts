@@ -1,44 +1,10 @@
 import axios from "axios";
 
-function getApiBase(): string {
-    // If env var is set (baked in at build time), use it
-    if (process.env.NEXT_PUBLIC_API_URL) {
-        return process.env.NEXT_PUBLIC_API_URL;
-    }
-
-    // Auto-detect at runtime in browser
-    if (typeof window !== "undefined") {
-        const hostname = window.location.hostname;
-        // If on Render (*.onrender.com), derive backend URL from frontend URL
-        if (hostname.includes("onrender.com")) {
-            const backendHost = hostname.replace("-frontend", "-backend");
-            return `https://${backendHost}`;
-        }
-    }
-
-    // Default: local development
-    return "http://localhost:8000";
-}
-
-// Lazy-initialized API base — resolved on first use in the browser
-let _apiBase: string | null = null;
-
-function apiBase(): string {
-    if (_apiBase === null) {
-        _apiBase = getApiBase();
-    }
-    return _apiBase;
-}
-
-// Create axios instance with dynamic baseURL via interceptor
+// All API calls go through Next.js rewrites proxy (/api/* -> backend)
+// This eliminates CORS issues since the browser only talks to the same origin
 const api = axios.create({
+    baseURL: "",  // relative — uses same origin, proxied via next.config.ts rewrites
     timeout: 30000,
-});
-
-// Set baseURL dynamically before each request
-api.interceptors.request.use((config) => {
-    config.baseURL = apiBase();
-    return config;
 });
 
 // ===== Download APIs =====
@@ -68,7 +34,7 @@ export async function getDownloadStatus(jobId: string) {
 }
 
 export function getDownloadFileUrl(jobId: string) {
-    return `${apiBase()}/api/download/file/${jobId}`;
+    return `/api/download/file/${jobId}`;
 }
 
 // ===== Stems APIs =====
@@ -88,7 +54,7 @@ export async function getStemsStatus(jobId: string) {
 
 export function getStemDownloadUrl(jobId: string, stem?: string) {
     const params = stem ? `?stem=${stem}` : "";
-    return `${apiBase()}/api/stems/download/${jobId}${params}`;
+    return `/api/stems/download/${jobId}${params}`;
 }
 
 // ===== Karaoke APIs =====
@@ -108,7 +74,7 @@ export async function getKaraokeStatus(jobId: string) {
 
 export function getKaraokeDownloadUrl(jobId: string, track?: string) {
     const params = track ? `?track=${track}` : "";
-    return `${apiBase()}/api/karaoke/download/${jobId}${params}`;
+    return `/api/karaoke/download/${jobId}${params}`;
 }
 
 // ===== Format Helpers =====
