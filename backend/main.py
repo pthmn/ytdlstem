@@ -34,9 +34,18 @@ app = FastAPI(
 
 # CORS — allow frontend origin
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Build allowed origins list
+allowed_origins = [
+    FRONTEND_URL,
+    "http://localhost:3000",
+]
+
+# Also allow any .onrender.com subdomain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.onrender\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
