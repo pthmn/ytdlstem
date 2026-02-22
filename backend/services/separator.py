@@ -6,7 +6,6 @@ Supports htdemucs model for 4-stem separation (vocals, drums, bass, other).
 import os
 import asyncio
 import shutil
-import subprocess
 from pydub import AudioSegment
 
 from services.queue import Job
@@ -17,13 +16,12 @@ async def _pre_download_if_needed(job: Job):
     """If the job has a URL, download the audio first."""
     if job.params.get('needs_download') and job.params.get('download_url'):
         url = job.params['download_url']
-        input_file = job.params['input_file']
         job.message = "Downloading audio from URL..."
         job.progress = 5.0
 
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': input_file.replace('.mp3', '.%(ext)s'),
+            'outtmpl': os.path.join(job.output_dir, 'input_audio.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'postprocessors': [{
@@ -52,7 +50,7 @@ async def handle_stems(job: Job):
 
     params = job.params
     output_format = params.get('output_format', 'mp3')
-    selected_stems = params.get('stems', 'all')  # all, vocals, drums, bass, other
+    selected_stems = params.get('stems', 'all')
     input_file = params.get('input_file')
 
     if not input_file or not os.path.exists(input_file):
@@ -65,13 +63,17 @@ async def handle_stems(job: Job):
     demucs_output = os.path.join(job.output_dir, 'demucs_out')
     os.makedirs(demucs_output, exist_ok=True)
 
+    # Build command — ternary must not be inline in list
     cmd = [
         'python', '-m', 'demucs',
         '--name', 'htdemucs',
         '--out', demucs_output,
-        '--mp3' if output_format == 'mp3' else '--float32',
-        input_file,
     ]
+    if output_format == 'mp3':
+        cmd.append('--mp3')
+    else:
+        cmd.append('--float32')
+    cmd.append(input_file)
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -79,33 +81,33 @@ async def handle_stems(job: Job):
         stderr=asyncio.subprocess.PIPE,
     )
 
-    # Read stderr for progress (Demucs outputs progress to stderr)
-    async def read_progress():
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            text = line.decode(errors='ignore').strip()
-            if '%' in text:
-                try:
-                    pct = float(text.split('%')[0].split()[-1])
-                    job.progress = 15 + (pct * 0.7)
-                except (ValueError, IndexError):
-                    pass
+    # Read stderr for progress
+    stderr_lines = []
+    while True:
+        line = await process.stderr.readline()
+        if not line:
+            break
+        text = line.decode(errors='ignore').strip()
+        stderr_lines.append(text)
+        if '%' in text:
+            try:
+                pct = float(text.split('%')[0].split()[-1])
+                job.progress = 15 + (pct * 0.7)
+            except (ValueError, IndexError):
+                pass
+        if text:
             job.message = f"Separating stems... {text[:100]}"
 
-    await read_progress()
     await process.wait()
 
     if process.returncode != 0:
-        stderr_out = await process.stderr.read()
-        raise Exception(f"Demucs failed: {stderr_out.decode(errors='ignore')[:500]}")
+        error_text = '\n'.join(stderr_lines[-10:])
+        raise Exception(f"Demucs failed: {error_text[:500]}")
 
     job.progress = 85.0
     job.message = "Preparing output files..."
 
     # Find Demucs output directory
-    # Demucs outputs to: <out>/htdemucs/<track_name>/
     htdemucs_dir = os.path.join(demucs_output, 'htdemucs')
     if not os.path.exists(htdemucs_dir):
         raise Exception("Demucs output directory not found")
@@ -132,7 +134,6 @@ async def handle_stems(job: Job):
                 break
 
         if stem_file and os.path.exists(stem_file):
-            # Convert if needed
             output_file = os.path.join(job.output_dir, f'{stem}.{ext}')
             if stem_file.endswith(f'.{ext}'):
                 shutil.copy2(stem_file, output_file)
@@ -169,19 +170,21 @@ async def handle_karaoke(job: Job):
     job.message = "Creating karaoke track with Demucs..."
     job.progress = 15.0
 
-    # Run Demucs — we only need vocals and no_vocals separation
-    # Using --two-stems vocals to split into vocals + accompaniment
     demucs_output = os.path.join(job.output_dir, 'demucs_out')
     os.makedirs(demucs_output, exist_ok=True)
 
+    # Build command properly
     cmd = [
         'python', '-m', 'demucs',
         '--name', 'htdemucs',
         '--two-stems', 'vocals',
         '--out', demucs_output,
-        '--mp3' if output_format == 'mp3' else '--float32',
-        input_file,
     ]
+    if output_format == 'mp3':
+        cmd.append('--mp3')
+    else:
+        cmd.append('--float32')
+    cmd.append(input_file)
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -189,32 +192,37 @@ async def handle_karaoke(job: Job):
         stderr=asyncio.subprocess.PIPE,
     )
 
-    async def read_progress():
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            text = line.decode(errors='ignore').strip()
-            if '%' in text:
-                try:
-                    pct = float(text.split('%')[0].split()[-1])
-                    job.progress = 15 + (pct * 0.7)
-                except (ValueError, IndexError):
-                    pass
+    # Read stderr for progress
+    stderr_lines = []
+    while True:
+        line = await process.stderr.readline()
+        if not line:
+            break
+        text = line.decode(errors='ignore').strip()
+        stderr_lines.append(text)
+        if '%' in text:
+            try:
+                pct = float(text.split('%')[0].split()[-1])
+                job.progress = 15 + (pct * 0.7)
+            except (ValueError, IndexError):
+                pass
+        if text:
             job.message = f"Removing vocals... {text[:100]}"
 
-    await read_progress()
     await process.wait()
 
     if process.returncode != 0:
-        stderr_out = await process.stderr.read()
-        raise Exception(f"Demucs failed: {stderr_out.decode(errors='ignore')[:500]}")
+        error_text = '\n'.join(stderr_lines[-10:])
+        raise Exception(f"Demucs failed: {error_text[:500]}")
 
     job.progress = 85.0
     job.message = "Preparing karaoke files..."
 
     # Find output
     htdemucs_dir = os.path.join(demucs_output, 'htdemucs')
+    if not os.path.exists(htdemucs_dir):
+        raise Exception("Demucs output directory not found")
+
     track_dirs = os.listdir(htdemucs_dir)
     if not track_dirs:
         raise Exception("No output tracks found")

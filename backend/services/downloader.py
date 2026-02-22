@@ -6,10 +6,7 @@ Embeds all available metadata (thumbnail, artist, album, etc.).
 
 import os
 import re
-import json
 import asyncio
-import subprocess
-from typing import Any
 
 import yt_dlp
 
@@ -36,26 +33,38 @@ async def search_songs(query: str, max_results: int = 10) -> list[dict]:
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': True,
-        'default_search': f'ytsearch{max_results}',
+        'extract_flat': 'in_playlist',
     }
+
+    # Use ytsearch directly as the URL
+    search_url = f'ytsearch{max_results}:{query}'
 
     def _extract():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=False)
+            info = ydl.extract_info(search_url, download=False)
+            if not info:
+                return []
             entries = info.get('entries', [])
             results = []
             for entry in entries:
-                if entry:
-                    results.append({
-                        'id': entry.get('id', ''),
-                        'title': entry.get('title', 'Unknown'),
-                        'url': entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id', '')}",
-                        'duration': entry.get('duration'),
-                        'thumbnail': entry.get('thumbnail') or entry.get('thumbnails', [{}])[0].get('url', '') if entry.get('thumbnails') else '',
-                        'channel': entry.get('channel') or entry.get('uploader', ''),
-                        'view_count': entry.get('view_count'),
-                    })
+                if not entry:
+                    continue
+                vid_id = entry.get('id', '')
+                thumbnail = ''
+                if entry.get('thumbnails'):
+                    thumbnail = entry['thumbnails'][-1].get('url', '')
+                elif entry.get('thumbnail'):
+                    thumbnail = entry['thumbnail']
+
+                results.append({
+                    'id': vid_id,
+                    'title': entry.get('title', 'Unknown'),
+                    'url': entry.get('url') or entry.get('webpage_url') or f"https://www.youtube.com/watch?v={vid_id}",
+                    'duration': entry.get('duration'),
+                    'thumbnail': thumbnail,
+                    'channel': entry.get('channel') or entry.get('uploader', ''),
+                    'view_count': entry.get('view_count'),
+                })
             return results
 
     return await asyncio.get_event_loop().run_in_executor(None, _extract)
@@ -96,7 +105,7 @@ async def get_formats(url: str) -> dict:
                     'filesize': f.get('filesize') or f.get('filesize_approx'),
                     'format_note': f.get('format_note', ''),
                     'quality': f.get('quality', 0),
-                    'tbr': f.get('tbr'),  # total bitrate
+                    'tbr': f.get('tbr'),
                 }
 
                 vcodec = f.get('vcodec', 'none')
@@ -116,8 +125,8 @@ async def get_formats(url: str) -> dict:
                     fmt.update({
                         'type': 'audio',
                         'acodec': acodec,
-                        'abr': f.get('abr'),  # audio bitrate
-                        'asr': f.get('asr'),  # sample rate
+                        'abr': f.get('abr'),
+                        'asr': f.get('asr'),
                     })
                     audio_formats.append(fmt)
 
@@ -145,7 +154,7 @@ async def handle_download(job: Job):
     params = job.params
     url = params['url']
     format_id = params.get('format_id', 'best')
-    download_type = params.get('type', 'video')  # video or audio
+    download_type = params.get('type', 'video')
     platform = detect_platform(url)
 
     job.message = f"Downloading from {platform}..."
