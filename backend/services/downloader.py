@@ -75,6 +75,7 @@ async def get_formats(url: str) -> dict:
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
+        'cookiefile': 'cookies.txt',
     }
 
     def _extract():
