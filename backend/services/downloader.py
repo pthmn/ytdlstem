@@ -184,6 +184,7 @@ async def _download_ytdlp(job: Job, url: str, format_id: str, download_type: str
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
+        'cookiefile': 'cookies.txt',
         # Metadata embedding
         'writethumbnail': True,
         'embedthumbnail': True,
